@@ -10,9 +10,14 @@
 #include <errno.h>
 #include <termios.h>
 
-int usb_out_descr;
-uint8_t devs[2] = {0x12, 0x14};
-float t, d;
+#define NO_ERROR		0x00
+#define DEVICE_ERROR		0x01
+#define TIME_OUT		0xFFFF
+#define	MAX_DEVICES		0x02
+
+uint8_t devs[MAX_DEVICES] = {0x12, 0x14};   // Devices list
+int usb_out_descr;			// Input/Output USB device descriptor
+struct termios usb_tty;			// Struct for termio parameters, MUST BE GLOBAL!!!
 
 /// Delay in nanoseconds
 void nanodelay(uint32_t nanosecs)
@@ -23,8 +28,8 @@ void nanodelay(uint32_t nanosecs)
 	;
 }
 
-/// Init teletype
-void init_tty_device()
+/// Open teletype device
+uint32_t open_tty_device()
 {
     // Open device file
     usb_out_descr = open("/dev/ttyUSB0", O_RDWR | O_NONBLOCK | O_NDELAY);
@@ -32,16 +37,21 @@ void init_tty_device()
     if (usb_out_descr < 0)
     {
 	    qDebug() << "Error " << errno << " opening device" << ": " << strerror (errno);
+	    return DEVICE_ERROR;
     }
 
-    // Init serial options of device file
-    struct termios usb_tty;
+    return NO_ERROR;
+}
 
+/// Init teletype device
+uint32_t init_tty_device()
+{
     memset (&usb_tty, 0, sizeof(usb_tty));
 
     if (tcgetattr(usb_out_descr, &usb_tty) != 0)
     {
 	    qDebug() << "Error " << errno << " from tcgetattr: " << strerror(errno);
+	    return DEVICE_ERROR;
     }
 
     cfsetospeed (&usb_tty, B19200);
@@ -67,14 +77,25 @@ void init_tty_device()
     if (tcsetattr(usb_out_descr, TCSANOW, &usb_tty) != 0)
     {
 	    qDebug() << "Error " << errno << " from tcsetattr";
+	    return DEVICE_ERROR;
     }
+
+    return NO_ERROR;
 }
 
-void close_tty_device()
+/// Close teletype device
+uint32_t close_tty_device()
 {
     // Close device file
+    if (usb_out_descr < 0)
+    {
+	    qDebug() << "Error device descriptor" << errno << " : " << strerror (errno);
+	    return DEVICE_ERROR;
+    }
     close(usb_out_descr);
     qDebug() << "Device closed";
+
+    return NO_ERROR;
 }
 
 /// Read temperature
@@ -108,13 +129,13 @@ float read_temperature(uint8_t devaddr)
     {
 	n_read = read(usb_out_descr, &buf, 32);
 	tout ++;
-    } while ((n_read == 4294967295) || (n_read == 0) && (tout < 10000));
+    } while ((n_read == 4294967295) || (n_read == 0) && (tout < TIME_OUT));
     tcflush(usb_out_descr, TCIFLUSH);
 
     // qDebug() << n_read;
     // qDebug() << buf[0] << buf[1] << buf[2] << buf[3] << buf[4] << buf[5] << buf[6] << buf[7];
 
-    if ((n_read != 8) || (tout == 10000))
+    if ((n_read != 8) || (tout == TIME_OUT))
     {
 	qDebug() << "Error reading: " << strerror(errno);
     }
@@ -200,13 +221,13 @@ float read_distance(uint8_t devaddr)
     {
 	n_read = read(usb_out_descr, &buf, 32);
 	tout ++;
-    } while ((n_read == 4294967295) || (n_read == 0) && (tout < 10000));
+    } while ((n_read == 4294967295) || (n_read == 0) && (tout < TIME_OUT));
     tcflush(usb_out_descr, TCIFLUSH);
 
      //qDebug() << n_read;
      //qDebug() << buf[0] << buf[1] << buf[2] << buf[3] << buf[4] << buf[5] << buf[6] << buf[7];
 
-    if ((n_read != 8) || (tout == 10000))
+    if ((n_read != 8) || (tout == TIME_OUT))
     {
 	qDebug() << "Error reading: " << strerror(errno);
     }
@@ -240,10 +261,10 @@ int main(int argc, char *argv[])
 //	trigger_sensor(devs[i]);
 //	nanodelay(400000000);
 //	qDebug() << "Distance (cm): " << read_distance(devs[i]);
-	t = read_temperature(devs[i]);
+	float t = read_temperature(devs[i]);
 	trigger_sensor(devs[i]);
 	nanodelay(400000000);
-	d = read_distance(devs[i]);
+	float d = read_distance(devs[i]);
 	qDebug() << devs[i] << t << d;
 
 
